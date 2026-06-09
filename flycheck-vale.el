@@ -120,7 +120,21 @@ passing the results to CALLBACK."
        (string-match "exited abnormally with code 1.*" event)))
 
 (defun flycheck-vale--start (checker callback)
-  "Run vale on the current buffer's contents with CHECKER, passing the results to CALLBACK."
+  "Run vale on the current buffer's contents with CHECKER, passing the results to CALLBACK.
+
+Vale is invoked in stdin mode (no positional file argument): the
+buffer's current contents are streamed to vale's stdin, so unsaved
+edits are linted.  The syntax is hinted to vale through `--ext'
+derived from the buffer's file extension (defaulting to `.txt' when
+the buffer has no associated file).  When the buffer is visiting a
+file, `--path' is also passed so vale's config search finds the
+project's `.vale.ini' relative to that path.
+
+This replaces an earlier invocation that passed `buffer-file-name'
+as a positional argument while also feeding the buffer over stdin;
+modern Vale (3.x) reads the file and exits before the stdin write
+completes, closing the pipe and raising
+\"Process flycheck-vale-process no longer connected to pipe\"."
 
   ;; Clear the output buffer
   (with-current-buffer (get-buffer-create flycheck-vale-output-buffer)
@@ -128,12 +142,17 @@ passing the results to CALLBACK."
     (erase-buffer))
 
   (let* ((process-connection-type nil)
-         (proc (start-process "flycheck-vale-process"
-                              flycheck-vale-output-buffer
-                              flycheck-vale-program
-                              "--output"
-                              "JSON"
-                              buffer-file-name)))
+         (ext (concat "." (or (and buffer-file-name
+                                   (file-name-extension buffer-file-name))
+                              "txt")))
+         (args (append (list "--output" "JSON" "--ext" ext)
+                       (when buffer-file-name
+                         (list "--path" buffer-file-name))))
+         (proc (apply #'start-process
+                      "flycheck-vale-process"
+                      flycheck-vale-output-buffer
+                      flycheck-vale-program
+                      args)))
     (let ((checker checker)
           (callback callback)
           (buf (current-buffer)))
